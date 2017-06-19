@@ -42,7 +42,7 @@ games = {}
 chapter_lookup = {}
 tree_parts_lookup = {}
 headers = {
-    'Accept': 'application/vnd.lichess.v1+json',
+    'Accept': 'application/vnd.lichess.v2+json',
 }
 cookie = None
 study_socket = None

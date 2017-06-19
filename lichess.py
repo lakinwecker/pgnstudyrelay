@@ -29,7 +29,8 @@ def add_study_chapter_message(name, pgn=None):
         "pgn": pgn.strip(),
         "orientation":"white",
         "mode":"normal",
-        "initial":False}
+        "initial":False,
+        "sticky": False}
     }
 
 
@@ -48,5 +49,6 @@ def add_move_to_study(new_node, old_node, chapter, tree_parts):
             "fen": old_node.board().fen(),
             "path": "".join([tp['id'] for tp in tree_parts[1:]]),
             "ch": chapter['id'],
+            "sticky": False
         }
     }
