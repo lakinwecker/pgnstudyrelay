@@ -39,16 +39,21 @@ def add_study_chapter_message(name, pgn=None):
 #
 
 
-def add_move_to_study(new_node, old_node, chapter, tree_parts):
+def add_move_to_study(new_node, old_node, chapter_id, tree_parts):
     uci = new_node.move.uci()
-    return {
-        "t":"anaMove",
-        "d":{
-            "orig": uci[:2],
-            "dest": uci[2:],
-            "fen": old_node.board().fen(),
-            "path": "".join([tp['id'] for tp in tree_parts[1:]]),
-            "ch": chapter['id'],
-            "sticky": False
+    try:
+        return {
+            "t":"anaMove",
+            "d":{
+                "orig": uci[:2],
+                "dest": uci[2:],
+                "fen": old_node.board().fen(),
+                "path": "".join([tp['id'] for tp in tree_parts[1:]]),
+                "ch": chapter_id,
+                "sticky": False,
+                "promote": True
+            }
         }
-    }
+    except:
+        import traceback
+        print(traceback.format_exc())

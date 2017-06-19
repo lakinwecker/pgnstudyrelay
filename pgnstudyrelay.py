@@ -82,7 +82,7 @@ def process_pgn(contents):
             games[key] = new_game
             print("inserting {}".format(key))
             yield send_to_study_socket(lichess.add_study_chapter_message(name="Chapter 1", pgn=str(new_game)))
-            yield sync_with_study()
+            yield sync_with_study() # TODO: ideally this would be sync_with_chapter.
             continue
 
         old_game = games[key]
@@ -90,8 +90,7 @@ def process_pgn(contents):
         new_node = new_game.variations[0]
         while True:
             if old_node.move.uci() != new_node.move.uci():
-                print("Corruption! Restart game: {}".format(key))
-                continue
+                break
             if old_node.is_end() or new_node.is_end():
                 break
             old_node = old_node.variations[0]
@@ -99,20 +98,15 @@ def process_pgn(contents):
         if old_node.is_end() and new_node.is_end():
             # print("No new moves for {}".format(key))
             continue
-        if not old_node.is_end() and new_node.is_end():
-            print(old_game, new_game)
-            print(old_node, new_node)
-            print("Corruption! old game is longer than new game!? {}".format(key))
-            # TODO: What do we do here!?
-            continue
+
         old_node = new_node
         new_node = new_node.variations[0]
         chapter = chapter_lookup[key]
         while True:
             print("New move in {}: {}".format(key, new_node.move.uci()))
-            message = lichess.add_move_to_study(new_node, old_node, chapter, tree_parts_lookup[key])
+            message = lichess.add_move_to_study(new_node, old_node, chapter['id'], tree_parts_lookup[key])
             yield send_to_study_socket(message)
-            yield sync_with_study(chapter_id=chapter['id'])
+            yield sync_chapter(chapter_id=chapter['id'])
             if new_node.is_end():
                 break
             old_node = new_node
@@ -128,7 +122,7 @@ def login():
     global cookie
     global headers
     client = httpclient.AsyncHTTPClient()
-    url = "https://lichess.org/login"
+    url = "https://listage.ovh/login"
     params = {"username": username, "password": password}
     login_request = httpclient.HTTPRequest(url, method="POST", headers=headers, body=urlencode(params))
     response = yield client.fetch(login_request)
@@ -137,10 +131,10 @@ def login():
     cookie.load(response.headers['Set-Cookie'])
     headers['Cookie'] = cookie['lila2'].OutputString()
 
-    url = "https://lichess.org/account/info"
+    url = "https://listage.ovh/account/info"
     account_info_request = httpclient.HTTPRequest(url, method="GET", headers=headers)
     response = yield client.fetch(account_info_request)
-    yield connect_to_study()
+    print("Got account info")
 
 @gen.coroutine
 def send_to_study_socket(message):
@@ -156,7 +150,7 @@ def send_to_study_socket(message):
 def connect_to_study():
     global study_socket
     sri = "".join([random.choice(string.ascii_letters) for x in range(10)])
-    study_url = "wss://socket.lichess.org/study/{}/socket/v2?sri={}".format(
+    study_url = "wss://socket.listage.ovh/study/{}/socket/v2?sri={}".format(
         study,
         sri
     )
@@ -181,57 +175,60 @@ def get_json(url):
 
 @gen.coroutine
 def get_study_data():
-    url = "https://lichess.org/study/{}?_={}".format(study, time.time())
+    url = "https://listage.ovh/study/{}?_={}".format(study, time.time())
     json = yield get_json(url)
     return json
 
 @gen.coroutine
 def get_chapter_data(chapter_id):
-    url = "https://lichess.org/study/{}/{}?_={}".format(study, chapter_id, time.time())
+    url = "https://listage.ovh/study/{}/{}?_={}".format(study, chapter_id, time.time())
     json = yield get_json(url)
     return json
 
 @gen.coroutine
+def sync_chapter(chapter_id=None):
+    chapter_data = yield get_chapter_data(chapter_id)
+    tags = {}
+    for tag_name, tag_value in chapter_data['study']['chapter']['tags']:
+        tags[tag_name] = tag_value
+    if not any([
+        tags.get('White'), tags.get('Black'),
+        tags.get('WhiteElo'), tags.get('BlackElo')
+    ]):
+        print("skipping chapter: {}".format(chapter_id))
+        return
+
+    pgn = ""
+    for tag_name, tag_value in chapter_data['study']['chapter']['tags']:
+        tags[tag_name] = tag_value
+        pgn += '[{} "{}"]\n'.format(tag_name, tag_value)
+    pgn += "\n"
+    moves = ""
+    for move in chapter_data['analysis']['treeParts'][1:]:
+        ply = int(move['ply'])
+        turn = "" if ply % 2 == 0 else "{}. ".format((ply+1) // 2)
+        moves += '{}{} '.format(turn, move['san'])
+        if len(moves) > 70:
+            moves += "\n"
+            pgn += moves
+            moves = ""
+    pgn += moves
+    pgn += " {}".format(tags['Result'])
+    new_game = chess.pgn.read_game(StringIO(pgn))
+    key = game_key(new_game)
+    new_game.key = key
+    games[key] = new_game
+    chapter_data['id'] = chapter_id
+    chapter_lookup[key] = chapter_data
+    tree_parts_lookup[key] = chapter_data['analysis']['treeParts']
+    print("Updating game {} from study info".format(key))
+
+@gen.coroutine
 def sync_with_study(chapter_id=None):
+    print("Syncing with study")
     study_data = yield get_study_data()
     for chapter in study_data['study'].get('chapters', []):
-        if chapter_id is not None and chapter['id'] != chapter_id:
-            continue
-        chapter_data = yield get_chapter_data(chapter['id'])
-        tags = {}
-        for tag_name, tag_value in chapter_data['study']['chapter']['tags']:
-            tags[tag_name] = tag_value
-        print(tags)
-        if not any([
-            tags.get('White'), tags.get('Black'),
-            tags.get('WhiteElo'), tags.get('BlackElo')
-        ]):
-            print("skipping chapter: {}".format(chapter['name']))
-            continue
-
-        pgn = ""
-        for tag_name, tag_value in chapter_data['study']['chapter']['tags']:
-            tags[tag_name] = tag_value
-            pgn += '[{} "{}"]\n'.format(tag_name, tag_value)
-        pgn += "\n"
-        moves = ""
-        for move in chapter_data['analysis']['treeParts'][1:]:
-            ply = int(move['ply'])
-            turn = "" if ply % 2 == 0 else "{}. ".format((ply+1) // 2)
-            moves += '{}{} '.format(turn, move['san'])
-            if len(moves) > 70:
-                moves += "\n"
-                pgn += moves
-                moves = ""
-        pgn += moves
-        pgn += " {}".format(tags['Result'])
-        new_game = chess.pgn.read_game(StringIO(pgn))
-        key = game_key(new_game)
-        new_game.key = key
-        games[key] = new_game
-        chapter_lookup[key] = chapter
-        tree_parts_lookup[key] = chapter_data['analysis']['treeParts']
-        print("Updating game {} from study info".format(key))
+        yield sync_chapter(chapter['id'])
 
 @gen.coroutine
 def update_pgns():
@@ -274,6 +271,7 @@ def main():
         _, username, password, study = sys.argv
         poll = poll_files
     yield login()
+    yield connect_to_study()
     yield sync_with_study()
     yield [poll(), listen_to_study()]
 
