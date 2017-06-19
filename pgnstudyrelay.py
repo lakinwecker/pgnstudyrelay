@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.  
 
+import pprint
 import chess
 import chess.pgn
 import glob
@@ -27,10 +28,29 @@ from tornado import websocket, web, ioloop, httpclient
 from http import cookies
 from urllib.parse import urlencode
 import time
+import lichess
 
 
+# everyone loves global mutable state, right?  Right?  
+# ...
+# ...
+# No one?
+# ...
+# ...
+# damn
 games = {}
-subscriptions = []
+chapter_lookup = {}
+tree_parts_lookup = {}
+headers = {
+    'Accept': 'application/vnd.lichess.v1+json',
+}
+cookie = None
+study_socket = None
+pgn_source_url = None
+username = None
+password = None
+study = None
+url = None
 
 
 def hacky_python_parsing_of_times(comment):
@@ -43,102 +63,13 @@ def hacky_python_parsing_of_times(comment):
     h,m,s = [int(x) for x in parts]
     return (((h*60) + m)*60)+s
 
-
 def game_key(game):
     white = "-".join(game.headers['White'].replace(",", "").split())
     black = "-".join(game.headers['Black'].replace(",", "").split())
     key = "{}-vs-{}".format(white.lower(), black.lower())
     return key
 
-def start_game_message(game):
-    game_json = game_message(game)['d']
-    return {
-        "t": "fen",
-        "d": {
-            "id": game_json['game']['id'],
-            "fen": game_json['game']['fen'],
-            "lm": game_json['game']['lastMove'],
-        }
-    }
-def game_message(game):
-    last_node = game
-    last_ply = 0
-    moves = []
-    while not last_node.is_end():
-        last_node = last_node.variations[0]
-        last_ply += 1
-        moves.append(last_node)
-    if last_node.board().turn == chess.WHITE:
-        white_last_move = last_node
-        black_last_move = last_node.parent
-    else:
-        black_last_move = last_node
-        white_last_move = last_node.parent
-
-    return {
-        "t": "game",
-        "d": {
-            "game": {
-                "id": game_key(game),
-                "variant": {"key": "standard", "name": "standard", "short": "Std" },
-                "speed": "classical",
-                "perf": "classical",
-                "rated": True,
-                "initialFen": game.board().fen(),
-                "fen": last_node.board().fen(),
-                "turns": last_ply,
-                "source": "norway-2017-arbiter",
-                "lastMove": last_node.move.uci(),
-                "opening": {
-                    "eco": game.headers["ECO"],
-                }
-            },
-            "clock": {
-                "running": True,
-                "initial": 6000,
-                "increment": 0, # lying - but I don't think lichess implements the style of increment
-                "white": hacky_python_parsing_of_times(white_last_move.comment),
-                "black": hacky_python_parsing_of_times(black_last_move.comment),
-            },
-            "player": {
-                "color": "white",
-                "rating": int(game.headers["WhiteElo"]),
-                "user": {
-                    "id": game.headers['White'],
-                    "username": game.headers['White'],
-                }
-            },
-            "opponent": {
-                "color": "black",
-                "rating": int(game.headers["BlackElo"]),
-                "user": {
-                    "id": game.headers['Black'],
-                    "username": game.headers['Black'],
-                }
-            },
-            "orientation": "white",
-            "steps": [move_message(n) for n in moves],
-        }
-    }
-
-# {"t":"fen","d":{"id":"CdDDXCJd","fen":"2r1rbk1/3b1ppp/q2p1n2/1pnPp3/p1N1P3/2N1B1PP/PP2QPB1/2R1R1K1","lm":"b7b5"}}
-# {"t": "fen", "d": {"ply": 0, "id": "caruana-fabiano-vs-kramnik-vladimir", "fen": "7r/8/1br3p1/p4p2/R2PpNkP/2P1KpP1/1P3P2/R7 w - - 0 45", "san": "Rxc6", "uci": "d6c6", "clock": {"white": 1494}, "lm": "d6c6"}}
-def move_message(node, ply=None, type="move"):
-    return {
-        "t": type,
-        "d": {
-            "id": game_key(node.root()),
-            "ply": 0 if ply is None else ply,
-            "uci": node.move.uci(),
-            "lm": node.move.uci(),
-            "san": node.san(),
-            "fen": node.board().fen(),
-            "clock": {
-                "white" if node.board().turn == chess.WHITE else "black": hacky_python_parsing_of_times(node.comment),
-            }
-        }
-    }
-
+@gen.coroutine
 def process_pgn(contents):
     handle = StringIO(contents)
     while True:
@@ -150,8 +81,9 @@ def process_pgn(contents):
         if key not in games:
             games[key] = new_game
             print("inserting {}".format(key))
+            yield send_to_study_socket(lichess.add_study_chapter_message(name="Chapter 1", pgn=str(new_game)))
             # TODO: This needs to be updated to create/find the chapter and then ensure it's up to date.
-            send(game_message(new_game))
+            yield sync_with_study()
             # BROADCAST TO CLIENTS OF NEW GAME
             continue
 
@@ -175,25 +107,137 @@ def process_pgn(contents):
             print("Corruption! old game is longer than new game!? {}".format(key))
             # TODO: What do we do here!?
             continue
+        old_node = new_node
         new_node = new_node.variations[0]
+        chapter = chapter_lookup[key]
         while True:
             print("New move in {}: {}".format(key, new_node.move.uci()))
             # TODO: This message needs to be updated
-            send(move_message(new_node, type="fen"))
+            #send(lichess.move_message(new_node, type="fen"))
+            message = lichess.add_move_to_study(new_node, old_node, chapter, tree_parts_lookup[key])
+            yield send_to_study_socket(message)
+            sync_with_study(chapter_id=chapter['id'])
             if new_node.is_end():
                 break
+            old_node = new_node
             new_node = new_node.variations[0]
         games[key] = new_game
 
+
+def send(message):
+    pass
+
+@gen.coroutine
+def login():
+    global cookie
+    global headers
+    client = httpclient.AsyncHTTPClient()
+    url = "https://lichess.org/login"
+    params = {"username": username, "password": password}
+    login_request = httpclient.HTTPRequest(url, method="POST", headers=headers, body=urlencode(params))
+    response = yield client.fetch(login_request)
+    print("Logged in")
+    cookie = cookies.SimpleCookie()
+    cookie.load(response.headers['Set-Cookie'])
+    headers['Cookie'] = cookie['lila2'].OutputString()
+
+    url = "https://lichess.org/account/info"
+    account_info_request = httpclient.HTTPRequest(url, method="GET", headers=headers)
+    response = yield client.fetch(account_info_request)
+    yield connect_to_study()
+
+@gen.coroutine
+def send_to_study_socket(message):
+    global study_socket
+    msg = json.dumps(message)
+    print(msg)
+    yield study_socket.write_message(msg)
+
+
+{"t":"changeChapter","d":{"p":{"chapterId":"dsVeR14T","path":""},"w":{"u":"tournament-relay","s":"JQMIkvjLKS"}},"v":59}
+
+@gen.coroutine
+def connect_to_study():
+    global study_socket
+    sri = "".join([random.choice(string.ascii_letters) for x in range(10)])
+    study_url = "wss://socket.lichess.org:9028/study/{}/socket/v2?sri={}".format(
+        study,
+        sri
+    )
+    socket_request = httpclient.HTTPRequest(study_url, headers=headers)
+    study_socket = yield websocket.websocket_connect(socket_request)
+    print("Connected to study!")
+
+@gen.coroutine
+def listen_to_study():
+    global study_socket
+    while True:
+        msg = yield study_socket.read_message()
+        if msg is None: break
+        print(msg)
+
+@gen.coroutine
+def get_study_data():
+    client = httpclient.AsyncHTTPClient()
+    url = "https://lichess.org/study/{}?_={}".format(study, time.time())
+    study_info_request = httpclient.HTTPRequest(url, method="GET", headers=headers)
+    response = yield client.fetch(study_info_request)
+    return json.loads(response.body.decode('utf-8'))
+
+@gen.coroutine
+def sync_with_study(chapter_id=None):
+    study_data = yield get_study_data()
+    for chapter in study_data['study'].get('chapters', []):
+        if chapter_id is not None and chapter['id'] != chapter_id:
+            continue
+        yield send_to_study_socket({"t":"setChapter","d": chapter['id']})
+        study_data = yield get_study_data()
+        tags = {}
+        for tag_name, tag_value in study_data['study']['chapter']['tags']:
+            tags[tag_name] = tag_value
+        if not any([
+            tags.get('White'), tags.get('Black'),
+            tags.get('WhiteElo'), tags.get('BlackElo')
+        ]):
+            print("skipping chapter: {}".format(chapter['name']))
+            continue
+
+        pgn = ""
+        for tag_name, tag_value in study_data['study']['chapter']['tags']:
+            tags[tag_name] = tag_value
+            pgn += '[{} "{}"]\n'.format(tag_name, tag_value)
+        pgn += "\n"
+        moves = ""
+        for move in study_data['analysis']['treeParts'][1:]:
+            ply = int(move['ply'])
+            turn = "" if ply % 2 == 0 else "{}. ".format((ply+1) // 2)
+            moves += '{}{} '.format(turn, move['san'])
+            if len(moves) > 70:
+                moves += "\n"
+                pgn += moves
+                moves = ""
+        pgn += moves
+        pgn += " {}".format(tags['Result'])
+        new_game = chess.pgn.read_game(StringIO(pgn))
+        key = game_key(new_game)
+        new_game.key = key
+        games[key] = new_game
+        chapter_lookup[key] = chapter
+        tree_parts_lookup[key] = study_data['analysis']['treeParts']
+        print("Updating game {} from study info".format(key))
+
 @gen.coroutine
 def update_pgns():
-    client = httpclient.AsyncHTTPClient()
-    url = "{}?v={}".format(pgn_source_url, time.time())
-    print(".", end="", flush=True)
-    response = yield client.fetch(url)
-    process_pgn(response.body.decode("ISO-8859-1")) # TODO: pull this from the content-type
+    while True:
+        client = httpclient.AsyncHTTPClient()
+        url = "{}?v={}".format(pgn_source_url, time.time())
+        print(".", end="", flush=True)
+        response = yield client.fetch(url)
+        yield process_pgn(response.body.decode("ISO-8859-1")) # TODO: pull this from the content-type
+        yield gen.sleep(1)
 
 already_processed = []
+@gen.coroutine
 def poll_files():
     files = sorted(glob.glob("./local-files/*.pgn"))
     for file in files:
@@ -202,68 +246,30 @@ def poll_files():
         print("Processing {}!".format(file))
         already_processed.append(file)
         contents = open(file, "r").read()
-        process_pgn(contents)
-        return # don't process anymore.
+        yield process_pgn(contents)
+        yield gen.sleep(0.5)
 
-def send(message):
-    pass
-
-headers = {
-    'Accept': 'application/vnd.lichess.v1+json',
-}
-cookie = None
 @gen.coroutine
-def login(study):
-    global cookie
-    global headers
-    client = httpclient.AsyncHTTPClient()
-    url = "https://lichess.org/login"
-    params = {"username": username, "password": password}
-    login_request = httpclient.HTTPRequest(url, method="POST", headers=headers, body=urlencode(params))
-    response = yield client.fetch(login_request)
-    cookie = cookies.SimpleCookie()
-    cookie.load(response.headers['Set-Cookie'])
-    headers['Cookie'] = cookie['lila2'].OutputString()
-
-    url = "https://lichess.org/account/info"
-    account_info_request = httpclient.HTTPRequest(url, method="GET", headers=headers)
-    response = yield client.fetch(account_info_request)
-    connect_to_study(study)
-    # TODO: At this point we can start polling for the new data. Not before
-
-socket = None
-@gen.coroutine
-def connect_to_study(study):
-    sri = "".join([random.choice(string.ascii_letters) for x in range(10)])
-    study_url = "wss://socket.lichess.org:9028/study/{}/socket/v2?sri={}".format(
-        study,
-        sri
-    )
-    socket_request = httpclient.HTTPRequest(study_url, headers=headers)
-    socket = yield websocket.websocket_connect(socket_request)
-
-    while True:
-        msg = yield socket.read_message()
-        if msg is None: break
-        print(msg)
-
-
-pgn_source_url = None
-username = password = study = url = None
-if __name__ == '__main__':
+def main():
+    global username
+    global password
+    global study
+    global url
     import sys
+    poll = None
     if len(sys.argv) < len(['username', 'password', 'study']):
         sys.exit("Usage: pgnstudyrelay.py <username> <password> <study> [<url>]")
     if len(sys.argv) == len(['_', 'username', 'password', 'study', 'url']):
         _, username, password, study, url = sys.argv
         pgn_source_url = url
-        # TODO: this should be moved to after we have connected to the study
-        pollpgn = ioloop.PeriodicCallback(update_pgns, 1000)
+        poll = update_pgns
     else:
-        print("Polling files!")
         _, username, password, study = sys.argv
-        pollpgn = ioloop.PeriodicCallback(poll_files, 500)
-        # TODO: this should be moved to after we have connected to the study
-    pollpgn.start()
-    login(study)
+        poll = poll_files
+    yield login()
+    yield sync_with_study()
+    yield [poll(), listen_to_study()]
+
+if __name__ == '__main__':
+    main()
 ioloop.IOLoop.instance().start()
