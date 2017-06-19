@@ -82,9 +82,7 @@ def process_pgn(contents):
             games[key] = new_game
             print("inserting {}".format(key))
             yield send_to_study_socket(lichess.add_study_chapter_message(name="Chapter 1", pgn=str(new_game)))
-            # TODO: This needs to be updated to create/find the chapter and then ensure it's up to date.
             yield sync_with_study()
-            # BROADCAST TO CLIENTS OF NEW GAME
             continue
 
         old_game = games[key]
@@ -112,8 +110,6 @@ def process_pgn(contents):
         chapter = chapter_lookup[key]
         while True:
             print("New move in {}: {}".format(key, new_node.move.uci()))
-            # TODO: This message needs to be updated
-            #send(lichess.move_message(new_node, type="fen"))
             message = lichess.add_move_to_study(new_node, old_node, chapter, tree_parts_lookup[key])
             yield send_to_study_socket(message)
             yield sync_with_study(chapter_id=chapter['id'])
