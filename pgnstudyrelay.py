@@ -116,7 +116,7 @@ def process_pgn(contents):
             #send(lichess.move_message(new_node, type="fen"))
             message = lichess.add_move_to_study(new_node, old_node, chapter, tree_parts_lookup[key])
             yield send_to_study_socket(message)
-            sync_with_study(chapter_id=chapter['id'])
+            yield sync_with_study(chapter_id=chapter['id'])
             if new_node.is_end():
                 break
             old_node = new_node
@@ -177,12 +177,23 @@ def listen_to_study():
         print(msg)
 
 @gen.coroutine
-def get_study_data():
+def get_json(url):
     client = httpclient.AsyncHTTPClient()
-    url = "https://lichess.org/study/{}?_={}".format(study, time.time())
     study_info_request = httpclient.HTTPRequest(url, method="GET", headers=headers)
     response = yield client.fetch(study_info_request)
     return json.loads(response.body.decode('utf-8'))
+
+@gen.coroutine
+def get_study_data():
+    url = "https://lichess.org/study/{}?_={}".format(study, time.time())
+    json = yield get_json(url)
+    return json
+
+@gen.coroutine
+def get_chapter_data(chapter_id):
+    url = "https://lichess.org/study/{}/{}?_={}".format(study, chapter_id, time.time())
+    json = yield get_json(url)
+    return json
 
 @gen.coroutine
 def sync_with_study(chapter_id=None):
@@ -190,11 +201,11 @@ def sync_with_study(chapter_id=None):
     for chapter in study_data['study'].get('chapters', []):
         if chapter_id is not None and chapter['id'] != chapter_id:
             continue
-        yield send_to_study_socket({"t":"setChapter","d": chapter['id']})
-        study_data = yield get_study_data()
+        chapter_data = yield get_chapter_data(chapter['id'])
         tags = {}
-        for tag_name, tag_value in study_data['study']['chapter']['tags']:
+        for tag_name, tag_value in chapter_data['study']['chapter']['tags']:
             tags[tag_name] = tag_value
+        print(tags)
         if not any([
             tags.get('White'), tags.get('Black'),
             tags.get('WhiteElo'), tags.get('BlackElo')
@@ -203,12 +214,12 @@ def sync_with_study(chapter_id=None):
             continue
 
         pgn = ""
-        for tag_name, tag_value in study_data['study']['chapter']['tags']:
+        for tag_name, tag_value in chapter_data['study']['chapter']['tags']:
             tags[tag_name] = tag_value
             pgn += '[{} "{}"]\n'.format(tag_name, tag_value)
         pgn += "\n"
         moves = ""
-        for move in study_data['analysis']['treeParts'][1:]:
+        for move in chapter_data['analysis']['treeParts'][1:]:
             ply = int(move['ply'])
             turn = "" if ply % 2 == 0 else "{}. ".format((ply+1) // 2)
             moves += '{}{} '.format(turn, move['san'])
@@ -223,7 +234,7 @@ def sync_with_study(chapter_id=None):
         new_game.key = key
         games[key] = new_game
         chapter_lookup[key] = chapter
-        tree_parts_lookup[key] = study_data['analysis']['treeParts']
+        tree_parts_lookup[key] = chapter_data['analysis']['treeParts']
         print("Updating game {} from study info".format(key))
 
 @gen.coroutine
