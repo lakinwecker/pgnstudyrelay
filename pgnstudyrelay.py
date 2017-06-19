@@ -160,7 +160,7 @@ def send_to_study_socket(message):
 def connect_to_study():
     global study_socket
     sri = "".join([random.choice(string.ascii_letters) for x in range(10)])
-    study_url = "wss://socket.lichess.org:9028/study/{}/socket/v2?sri={}".format(
+    study_url = "wss://socket.lichess.org/study/{}/socket/v2?sri={}".format(
         study,
         sri
     )
