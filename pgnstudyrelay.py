@@ -182,8 +182,6 @@ def send_to_study_socket(message):
     yield study_socket.write_message(msg)
 
 
-{"t":"changeChapter","d":{"p":{"chapterId":"dsVeR14T","path":""},"w":{"u":"tournament-relay","s":"JQMIkvjLKS"}},"v":59}
-
 @gen.coroutine
 def connect_to_study():
     global study_socket
@@ -204,7 +202,7 @@ def ping_study():
     while True:
         i += 1
         try:
-            yield send_to_study_socket({"t": "p", "v": i})
+            yield send_to_study_socket({"t": "p"})
             yield gen.sleep(1)
         except:
             import traceback
