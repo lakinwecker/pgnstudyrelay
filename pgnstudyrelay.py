@@ -51,7 +51,8 @@ username = None
 password = None
 study = None
 url = None
-
+http_url = "https://listage.ovh"
+ws_url = "wss://socket.listage.ovh"
 
 def game_key_from_tags(tags):
     white = "-".join(tags['White'].replace(",", "").split())
@@ -159,7 +160,7 @@ def login():
     global cookie
     global headers
     client = httpclient.AsyncHTTPClient()
-    url = "https://listage.ovh/login"
+    url = "{}/login".format(http_url)
     params = {"username": username, "password": password}
     login_request = httpclient.HTTPRequest(url, method="POST", headers=headers, body=urlencode(params))
     response = yield client.fetch(login_request)
@@ -168,7 +169,7 @@ def login():
     cookie.load(response.headers['Set-Cookie'])
     headers['Cookie'] = cookie['lila2'].OutputString()
 
-    url = "https://listage.ovh/account/info"
+    url = "{}/account/info".format(http_url)
     account_info_request = httpclient.HTTPRequest(url, method="GET", headers=headers)
     response = yield client.fetch(account_info_request)
     print("Got account info")
@@ -187,7 +188,8 @@ def send_to_study_socket(message):
 def connect_to_study():
     global study_socket
     sri = "".join([random.choice(string.ascii_letters) for x in range(10)])
-    study_url = "wss://socket.listage.ovh/study/{}/socket/v2?sri={}".format(
+    study_url = "{}/study/{}/socket/v2?sri={}".format(
+        ws_url,
         study,
         sri
     )
@@ -213,13 +215,13 @@ def get_json(url):
 
 @gen.coroutine
 def get_study_data():
-    url = "https://listage.ovh/study/{}?_={}".format(study, time.time())
+    url = "{}/study/{}?_={}".format(http_url, study, time.time())
     json = yield get_json(url)
     return json
 
 @gen.coroutine
 def get_chapter_data(chapter_id):
-    url = "https://listage.ovh/study/{}/{}?_={}".format(study, chapter_id, time.time())
+    url = "{}/study/{}/{}?_={}".format(http_url, study, chapter_id, time.time())
     json = yield get_json(url)
     return json
 
