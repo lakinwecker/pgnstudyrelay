@@ -20,17 +20,18 @@
 
 def add_study_chapter_message(name, pgn=None):
     return {
-    "t":"addChapter",
-    "d":{
-        "name": name,
-        "game":None,
-        "variant":"Automatic",
-        "fen":None,
-        "pgn": pgn.strip(),
-        "orientation":"white",
-        "mode":"normal",
-        "initial":False,
-        "sticky": False}
+        "t":"addChapter",
+        "d":{
+            "name": name,
+            "game":None,
+            "variant":"Automatic",
+            "fen":None,
+            "pgn": pgn.strip(),
+            "orientation":"white",
+            "mode":"normal",
+            "initial":False,
+            "sticky": False
+        }
     }
 
 
@@ -61,7 +62,7 @@ def add_move_to_study(new_node, old_node, chapter_id, path):
     }
     clock = clock_from_comment(new_node.comment)
     if clock:
-        move["clock"] = "{}".format(clock)
+        move["d"]["clock"] = "{}".format(clock)
     return move
 
 
