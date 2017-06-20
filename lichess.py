@@ -39,7 +39,7 @@ def add_study_chapter_message(name, pgn=None):
 #
 
 
-def add_move_to_study(new_node, old_node, chapter_id, tree_parts):
+def add_move_to_study(new_node, old_node, chapter_id, path):
     uci = new_node.move.uci()
     try:
         return {
@@ -48,7 +48,7 @@ def add_move_to_study(new_node, old_node, chapter_id, tree_parts):
                 "orig": uci[:2],
                 "dest": uci[2:],
                 "fen": old_node.board().fen(),
-                "path": "".join([tp['id'] for tp in tree_parts[1:]]),
+                "path": path,
                 "ch": chapter_id,
                 "sticky": False,
                 "promote": True

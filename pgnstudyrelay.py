@@ -38,7 +38,6 @@ import lichess
 # ...
 # ...
 # damn
-games = {}
 chapter_lookup = {}
 tree_parts_lookup = {}
 headers = {
@@ -63,59 +62,82 @@ def hacky_python_parsing_of_times(comment):
     h,m,s = [int(x) for x in parts]
     return (((h*60) + m)*60)+s
 
-def game_key(game):
-    white = "-".join(game.headers['White'].replace(",", "").split())
-    black = "-".join(game.headers['Black'].replace(",", "").split())
+def game_key_from_tags(tags):
+    white = "-".join(tags['White'].replace(",", "").split())
+    black = "-".join(tags['Black'].replace(",", "").split())
     key = "{}-vs-{}".format(white.lower(), black.lower())
     return key
 
+def game_key_from_game(game):
+    return game_key_from_tags(game.headers)
+
+def game_key_from_chapter(chapter):
+    tags = dict(chapter['study']['chapter']['tags'])
+    return game_key_from_tags(tags)
+
 @gen.coroutine
 def process_pgn(contents):
-    handle = StringIO(contents)
-    while True:
-        new_game = chess.pgn.read_game(handle)
-        if new_game is None:
-            break
-        key = game_key(new_game)
-        new_game.key = key
-        if key not in games:
-            games[key] = new_game
-            print("inserting {}".format(key))
-            yield send_to_study_socket(lichess.add_study_chapter_message(name="Chapter 1", pgn=str(new_game)))
-            yield sync_with_study() # TODO: ideally this would be sync_with_chapter.
-            continue
-
-        old_game = games[key]
-        old_node = old_game.variations[0]
-        new_node = new_game.variations[0]
+    try:
+        handle = StringIO(contents)
         while True:
-            if old_node.move.uci() != new_node.move.uci():
+            new_game = chess.pgn.read_game(handle)
+            if new_game is None:
                 break
-            if old_node.is_end() or new_node.is_end():
-                break
-            old_node = old_node.variations[0]
-            new_node = new_node.variations[0]
-        if old_node.is_end() and new_node.is_end():
-            # print("No new moves for {}".format(key))
-            continue
+            key = game_key_from_game(new_game)
+            new_game.key = key
+            if key not in chapter_lookup:
+                print("inserting {}".format(key))
+                yield send_to_study_socket(lichess.add_study_chapter_message(name="Chapter 1", pgn=str(new_game)))
+                yield sync_with_study() # TODO: ideally this would be sync_with_chapter.
+                continue
 
-        old_node = new_node
-        new_node = new_node.variations[0]
-        chapter = chapter_lookup[key]
-        while True:
-            print("New move in {}: {}".format(key, new_node.move.uci()))
-            message = lichess.add_move_to_study(new_node, old_node, chapter['id'], tree_parts_lookup[key])
-            yield send_to_study_socket(message)
+            chapter = chapter_lookup[key]
+            # Make sure we're up to date
             yield sync_chapter(chapter_id=chapter['id'])
-            if new_node.is_end():
-                break
-            old_node = new_node
-            new_node = new_node.variations[0]
-        games[key] = new_game
+            chapter = chapter_lookup[key]
+            tree_parts = chapter['analysis']['treeParts']
+            total_ply = len(tree_parts)
+            tree_index = 1
+            tree_node = tree_parts[tree_index]
+            path = ""
+            cur_node = new_game.variations[0]
+            prev_node = None
+            while True:
+                if tree_node['san'] != cur_node.san():
+                    break
+                if tree_index+1 == total_ply or cur_node.is_end():
+                    break
+                path += tree_node['id']
+                tree_index += 1
+                tree_node = tree_parts[tree_index]
+                prev_node = cur_node
+                cur_node = cur_node.variations[0]
 
+            if cur_node.is_end():
+                # print("No new moves for {}".format(key))
+                continue
 
-def send(message):
-    pass
+            while True:
+                print("New move in {}: {}".format(key, cur_node.move.uci()))
+                message = lichess.add_move_to_study(cur_node, prev_node, chapter['id'], path)
+                yield send_to_study_socket(message)
+                yield sync_chapter(chapter_id=chapter['id'])
+                chapter = chapter_lookup[key]
+                tree_parts = chapter['analysis']['treeParts']
+                new_tree_node = tree_parts[tree_index]
+                tree_index +=1
+                if new_tree_node['uci'] != cur_node.move.uci():
+                    print("Adding new node failed")
+                    return
+                path += new_tree_node['id']
+
+                if cur_node.is_end():
+                    break
+                prev_node = cur_node
+                cur_node = cur_node.variations[0]
+    except:
+        import traceback
+        print(traceback.format_exc())
 
 @gen.coroutine
 def login():
@@ -214,10 +236,7 @@ def sync_chapter(chapter_id=None):
             moves = ""
     pgn += moves
     pgn += " {}".format(tags['Result'])
-    new_game = chess.pgn.read_game(StringIO(pgn))
-    key = game_key(new_game)
-    new_game.key = key
-    games[key] = new_game
+    key = game_key_from_chapter(chapter_data)
     chapter_data['id'] = chapter_id
     chapter_lookup[key] = chapter_data
     tree_parts_lookup[key] = chapter_data['analysis']['treeParts']
