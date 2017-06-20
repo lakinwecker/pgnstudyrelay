@@ -76,7 +76,6 @@ def process_pgn(contents):
                 break
             key = game_key_from_game(new_game)
             new_game.key = key
-            sync = False
             if key not in game_lookup:
                 game_lookup[key] = new_game
             else:
@@ -202,6 +201,7 @@ def listen_to_study():
     while True:
         msg = yield study_socket.read_message()
         if msg is None: break
+        print("Recieved message: ")
         print(msg)
 
 @gen.coroutine
@@ -288,7 +288,7 @@ def poll_files():
         already_processed.append(file)
         contents = open(file, "r").read()
         yield process_pgn(contents)
-        yield gen.sleep(0.5)
+        yield gen.sleep(1)
 
 @gen.coroutine
 def main():
