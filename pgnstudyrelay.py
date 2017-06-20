@@ -102,22 +102,31 @@ def process_pgn(contents):
             path = ""
             cur_node = new_game.variations[0]
             prev_node = None
+
+            more_data_incoming = False
+
             while True:
                 if tree_node['san'] != cur_node.san():
+                    print("Difference in move sans!")
+                    more_data_incoming = True
                     break
-                if tree_index+1 == total_ply or cur_node.is_end():
+                if cur_node.is_end():
+                    path += tree_node['id']
+                    print("End of incoming data")
                     break
+
+                if tree_index+1 == total_ply:
+                    print("End of chapter")
+                    more_data_incoming = True
+                    break
+
                 path += tree_node['id']
                 tree_index += 1
                 tree_node = tree_parts[tree_index]
                 prev_node = cur_node
                 cur_node = cur_node.variations[0]
 
-            if cur_node.is_end():
-                # print("No new moves for {}".format(key))
-                continue
-
-            while True:
+            while more_data_incoming:
                 print("New move in {}: {}".format(key, cur_node.move.uci()))
                 message = lichess.add_move_to_study(cur_node, prev_node, chapter['id'], path)
                 yield send_to_study_socket(message)
@@ -125,7 +134,7 @@ def process_pgn(contents):
                 chapter = chapter_lookup[key]
                 tree_parts = chapter['analysis']['treeParts']
                 new_tree_node = tree_parts[tree_index]
-                tree_index +=1
+                tree_index += 1
                 if new_tree_node['uci'] != cur_node.move.uci():
                     print("Adding new node failed")
                     return
@@ -133,8 +142,15 @@ def process_pgn(contents):
 
                 if cur_node.is_end():
                     break
+
                 prev_node = cur_node
                 cur_node = cur_node.variations[0]
+
+            incoming_result = new_game.headers['Result']
+            if incoming_result != "*":
+                if chapter['tags']['Result'] != incoming_result and cur_node.is_end():
+                    yield send_to_study_socket(lichess.set_tag(chapter['id'], 'Result', new_game.headers['Result']))
+                    yield send_to_study_socket(lichess.set_comment(chapter['id'], path, "Game ended in: {}".format(incoming_result)))
     except:
         import traceback
         print(traceback.format_exc())
@@ -213,6 +229,8 @@ def sync_chapter(chapter_id=None):
     tags = {}
     for tag_name, tag_value in chapter_data['study']['chapter']['tags']:
         tags[tag_name] = tag_value
+
+    chapter_data['tags'] = tags
     if not any([
         tags.get('White'), tags.get('Black'),
         tags.get('WhiteElo'), tags.get('BlackElo')

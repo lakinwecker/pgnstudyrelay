@@ -47,23 +47,41 @@ def clock_from_comment(comment):
 
 def add_move_to_study(new_node, old_node, chapter_id, path):
     uci = new_node.move.uci()
-    try:
-        move = {
-            "t":"anaMove",
-            "d":{
-                "orig": uci[:2],
-                "dest": uci[2:],
-                "fen": old_node.board().fen(),
-                "path": path,
-                "ch": chapter_id,
-                "sticky": False,
-                "promote": True,
-            }
+    move = {
+        "t":"anaMove",
+        "d":{
+            "orig": uci[:2],
+            "dest": uci[2:],
+            "fen": old_node.board().fen(),
+            "path": path,
+            "ch": chapter_id,
+            "sticky": False,
+            "promote": True,
         }
-        clock = clock_from_comment(new_node.comment)
-        if clock:
-            move["clock"] = "{}".format(clock)
-        return move
-    except:
-        import traceback
-        print(traceback.format_exc())
+    }
+    clock = clock_from_comment(new_node.comment)
+    if clock:
+        move["clock"] = "{}".format(clock)
+    return move
+
+
+#{"t":"setTag","d":{"chapterId":"NNgEcycT","name":"Result","value":"1/2-1/2"}}
+def set_tag(chapter_id, tag_name, tag_value):
+    return {
+        "t": "setTag",
+        "d": {
+            "chapterId": chapter_id,
+            "name": tag_name,
+            "value": tag_value,
+        }
+    }
+
+def set_comment(chapter_id, path, comment):
+    return {
+        "t": "setComment",
+        "d": { 
+            "ch": chapter_id,
+            "path": path,
+            "text": comment
+        }
+    }
