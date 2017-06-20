@@ -38,6 +38,7 @@ import lichess
 # ...
 # ...
 # damn
+game_lookup = {}
 chapter_lookup = {}
 tree_parts_lookup = {}
 headers = {
@@ -85,6 +86,15 @@ def process_pgn(contents):
                 break
             key = game_key_from_game(new_game)
             new_game.key = key
+            sync = False
+            if key not in game_lookup:
+                game_lookup[key] = new_game
+            else:
+                old_game = game_lookup[key]
+                if str(old_game) == str(new_game):
+                    continue
+                game_lookup[key] = new_game
+
             if key not in chapter_lookup:
                 print("inserting {}".format(key))
                 yield send_to_study_socket(lichess.add_study_chapter_message(name="Chapter 1", pgn=str(new_game)))
