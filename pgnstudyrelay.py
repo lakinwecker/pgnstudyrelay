@@ -198,6 +198,19 @@ def connect_to_study():
     print("Connected to study!")
 
 @gen.coroutine
+def ping_study():
+    global study_socket
+    i = 0
+    while True:
+        i += 1
+        try:
+            yield send_to_study_socket({"t": "p", "v": i})
+            yield gen.sleep(1)
+        except:
+            import traceback
+            print(traceback.format_exc())
+
+@gen.coroutine
 def listen_to_study():
     global study_socket
     while True:
@@ -299,7 +312,7 @@ def main():
     yield login()
     yield connect_to_study()
     yield sync_with_study()
-    yield [poll(), listen_to_study()]
+    yield [poll(), listen_to_study(), ping_study()]
 
 if __name__ == '__main__':
     main()
