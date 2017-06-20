@@ -201,10 +201,13 @@ def connect_to_study():
 def listen_to_study():
     global study_socket
     while True:
-        msg = yield study_socket.read_message()
-        if msg is None: break
-        print("Recieved message: ")
-        print(msg)
+        try:
+            msg = yield study_socket.read_message()
+            if msg is None: continue
+            print("------------------> Recieved message: ", msg)
+        except:
+            import traceback
+            print(traceback.format_exc())
 
 @gen.coroutine
 def get_json(url):
