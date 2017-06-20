@@ -53,16 +53,6 @@ study = None
 url = None
 
 
-def hacky_python_parsing_of_times(comment):
-    if not "[%clk" in comment:
-        return None
-    comment = comment.replace("[%clk ", "")
-    comment = comment.replace("]", "")
-    parts = comment.split(":")
-    assert len(parts) == 3
-    h,m,s = [int(x) for x in parts]
-    return (((h*60) + m)*60)+s
-
 def game_key_from_tags(tags):
     white = "-".join(tags['White'].replace(",", "").split())
     black = "-".join(tags['Black'].replace(",", "").split())

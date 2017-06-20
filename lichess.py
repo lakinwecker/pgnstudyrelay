@@ -38,11 +38,17 @@ def add_study_chapter_message(name, pgn=None):
 #{"t":"anaMove","d":{"orig":"h4","dest":"f6","fen":"r5k1/p5pp/B2p1nb1/3p4/7B/7P/P1P3P1/1R4K1 w - - 2 26","path":"/?WG)8\\M(DaP'*P?('?N8G`WD(MG'G_b.>WPG'`_%@_'&'N_$5P>5FVN@IXPIB>,#$,G0@UM@GMFGP_P(6]V2:TD6D^_'_V_DK_Q","ch":"rZ5fgilU"}}
 #
 
+def clock_from_comment(comment):
+    if not "[%clk" in comment:
+        return None
+    comment = comment.replace("[%clk ", "")
+    comment = comment.replace("]", "")
+    return comment.strip()
 
 def add_move_to_study(new_node, old_node, chapter_id, path):
     uci = new_node.move.uci()
     try:
-        return {
+        move = {
             "t":"anaMove",
             "d":{
                 "orig": uci[:2],
@@ -51,9 +57,13 @@ def add_move_to_study(new_node, old_node, chapter_id, path):
                 "path": path,
                 "ch": chapter_id,
                 "sticky": False,
-                "promote": True
+                "promote": True,
             }
         }
+        clock = clock_from_comment(new_node.comment)
+        if clock:
+            move["clock"] = "{}".format(clock)
+        return move
     except:
         import traceback
         print(traceback.format_exc())
