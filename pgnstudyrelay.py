@@ -240,22 +240,6 @@ def sync_chapter(chapter_id=None):
         print("skipping chapter: {}".format(chapter_id))
         return
 
-    pgn = ""
-    for tag_name, tag_value in chapter_data['study']['chapter']['tags']:
-        tags[tag_name] = tag_value
-        pgn += '[{} "{}"]\n'.format(tag_name, tag_value)
-    pgn += "\n"
-    moves = ""
-    for move in chapter_data['analysis']['treeParts'][1:]:
-        ply = int(move['ply'])
-        turn = "" if ply % 2 == 0 else "{}. ".format((ply+1) // 2)
-        moves += '{}{} '.format(turn, move['san'])
-        if len(moves) > 70:
-            moves += "\n"
-            pgn += moves
-            moves = ""
-    pgn += moves
-    pgn += " {}".format(tags['Result'])
     key = game_key_from_chapter(chapter_data)
     chapter_data['id'] = chapter_id
     chapter_lookup[key] = chapter_data
