@@ -17,6 +17,7 @@
 
 
 # Helpers for making lichess style messages
+from chess import PIECE_SYMBOLS, SQUARES, square_file, square_rank
 
 def add_study_chapter_message(name, pgn=None):
     return {
@@ -86,3 +87,69 @@ def set_comment(chapter_id, path, comment):
             "text": comment
         }
     }
+
+def hash_code(pos):
+    return 8 * square_rank(pos) + square_file(pos)
+
+char_shift = 35;
+void_char = chr(33);
+
+pos_to_char_map = {pos: chr(hash_code(pos) + char_shift) for pos in SQUARES}
+pos_to_char_map_size = len(pos_to_char_map)
+def to_char(pos):
+    return pos_to_char_map.get(pos, void_char)
+
+all_promotable = ["q", "r", "b", "n","k"]
+promotion_to_char_map = {}
+for index, role in enumerate(all_promotable):
+    for file in range(0,8):
+        promotion_to_char_map[(file, role)] = chr(char_shift + pos_to_char_map_size  + index * 8 + file)
+        print(file, role, promotion_to_char_map[(file, role)])
+promotion_to_char_map_size = len(promotion_to_char_map)
+def to_char_with_promotion(file, role):
+    return promotion_to_char_map.get((file, role), void_char)
+
+drop_role_to_char_map = {}
+droppable = [s for s in PIECE_SYMBOLS if s not in ("", "k")]
+droppable = ["q", "r", "b", "n","p"]
+for index, role in enumerate(droppable):
+    drop_role_to_char_map[role] = chr(char_shift + pos_to_char_map_size + promotion_to_char_map_size + index)
+
+def move_to_path_id(move):
+    """Turn a move into a unique 2 character symbol, based on:
+    https://github.com/ornicar/scalachess/blob/ba0a2a56378e268d78e00f3f1457730552c6ce01/src/main/scala/format/UciCharPair.scala
+
+    >>> from chess import E2, E4, Move, QUEEN
+    >>> move_to_path_id(Move(E2, E4))
+    '/?'
+
+    >>> from chess import A7, A8, Move, QUEEN
+    >>> move_to_path_id(Move(A7, A8, QUEEN))
+    'Sc'
+
+    >>> from chess import H7, H8, Move, KNIGHT
+    >>> move_to_path_id(Move(H7, H8, KNIGHT))
+    'Z\x82'
+
+    """
+    if move.drop:
+        return "{}{}".format(
+			to_char(move.from_square),
+            drop_role_to_char_map.get(PIECE_SYMBOLS[move.drop], void_char)
+        )
+    elif move.promotion:
+        return "{}{}".format(
+            to_char(move.from_square),
+            to_char_with_promotion(square_file(move.to_square), PIECE_SYMBOLS[move.promotion])
+        )
+    elif move:
+        return "{}{}".format(
+            to_char(move.from_square),
+            to_char(move.to_square)
+        )
+    else:
+        return "" # TODO: what to do for null moves?
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()
