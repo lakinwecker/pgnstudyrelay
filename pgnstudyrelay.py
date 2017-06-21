@@ -97,45 +97,52 @@ def process_pgn(contents):
             chapter = chapter_lookup[key]
             tree_parts = chapter['analysis']['treeParts']
             total_ply = len(tree_parts)
-            tree_index = 1
-            tree_node = tree_parts[tree_index]
-            path = ""
-            cur_node = new_game.variations[0]
-            prev_node = None
 
             more_data_incoming = False
-
-            while True:
-                if tree_node['san'] != cur_node.san():
-                    print("Difference in move sans!")
-                    more_data_incoming = True
-                    break
-                if cur_node.is_end():
-                    path += tree_node['id']
-                    print("End of incoming data")
-                    break
-
-                if tree_index+1 == total_ply:
-                    print("End of chapter")
-                    more_data_incoming = True
-                    break
-
-                path += tree_node['id']
-                tree_index += 1
+            path = ""
+            if not len(new_game.variations) > 0:
+                print("No game data yet")
+                continue
+            cur_node = new_game.variations[0]
+            prev_node = new_game
+            if total_ply > 1:
+                tree_index = 1
                 tree_node = tree_parts[tree_index]
-                prev_node = cur_node
-                cur_node = cur_node.variations[0]
+
+                while True:
+                    if tree_node['san'] != cur_node.san():
+                        print("Difference in move sans!")
+                        more_data_incoming = True
+                        break
+                    if cur_node.is_end():
+                        path += tree_node['id']
+                        print("End of incoming data")
+                        break
+
+                    if tree_index+1 == total_ply:
+                        print("End of chapter")
+                        more_data_incoming = True
+                        break
+
+                    path += tree_node['id']
+                    tree_index += 1
+                    tree_node = tree_parts[tree_index]
+                    prev_node = cur_node
+                    cur_node = cur_node.variations[0]
+            else:
+                more_data_incoming = True
 
             while more_data_incoming:
                 print("New move in {}: {}".format(key, cur_node.move.uci()))
                 message = lichess.add_move_to_study(cur_node, prev_node, chapter['id'], path)
                 yield send_to_study_socket(message)
-                path += lichess.move_to_path_id(cur_node.move)
+                path += lichess.move_to_path_id(cur_node.board()._to_chess960(cur_node.move))
                 if cur_node.is_end():
                     break
 
                 prev_node = cur_node
                 cur_node = cur_node.variations[0]
+                yield gen.sleep(0.5)
 
             incoming_result = new_game.headers['Result']
             if incoming_result != "*":
@@ -287,6 +294,7 @@ def main():
     global password
     global study
     global url
+    global pgn_source_url
     import sys
     poll = None
     if len(sys.argv) < len(['username', 'password', 'study']):
@@ -294,6 +302,7 @@ def main():
     if len(sys.argv) == len(['_', 'username', 'password', 'study', 'url']):
         _, username, password, study, url = sys.argv
         pgn_source_url = url
+        print("Polling URL!")
         poll = update_pgns
     else:
         _, username, password, study = sys.argv

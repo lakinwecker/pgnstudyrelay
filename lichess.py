@@ -109,6 +109,7 @@ droppable = ["q", "r", "b", "n","p"]
 for index, role in enumerate(droppable):
     drop_role_to_char_map[role] = chr(char_shift + pos_to_char_map_size + promotion_to_char_map_size + index)
 
+
 def move_to_path_id(move):
     """Turn a move into a unique 2 character symbol, based on:
     https://github.com/ornicar/scalachess/blob/ba0a2a56378e268d78e00f3f1457730552c6ce01/src/main/scala/format/UciCharPair.scala
@@ -124,6 +125,10 @@ def move_to_path_id(move):
     >>> from chess import H7, H8, Move, KNIGHT
     >>> move_to_path_id(Move(H7, H8, KNIGHT))
     'Z\x82'
+
+    >>> from chess import E1, H1, Move
+    >>> move_to_path_id(Move(E1, H1))
+    "'*"
 
     """
     if move.drop:
