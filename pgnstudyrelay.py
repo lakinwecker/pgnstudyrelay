@@ -130,16 +130,7 @@ def process_pgn(contents):
                 print("New move in {}: {}".format(key, cur_node.move.uci()))
                 message = lichess.add_move_to_study(cur_node, prev_node, chapter['id'], path)
                 yield send_to_study_socket(message)
-                yield sync_chapter(chapter_id=chapter['id'])
-                chapter = chapter_lookup[key]
-                tree_parts = chapter['analysis']['treeParts']
-                new_tree_node = tree_parts[tree_index]
-                tree_index += 1
-                if new_tree_node['uci'] != cur_node.move.uci():
-                    print("Adding new node failed")
-                    return
-                path += new_tree_node['id']
-
+                path += lichess.move_to_path_id(cur_node.move)
                 if cur_node.is_end():
                     break
 
