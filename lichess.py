@@ -104,7 +104,6 @@ promotion_to_char_map = {}
 for index, role in enumerate(all_promotable):
     for file in range(0,8):
         promotion_to_char_map[(file, role)] = chr(char_shift + pos_to_char_map_size  + index * 8 + file)
-        print(file, role, promotion_to_char_map[(file, role)])
 promotion_to_char_map_size = len(promotion_to_char_map)
 def to_char_with_promotion(file, role):
     return promotion_to_char_map.get((file, role), void_char)
