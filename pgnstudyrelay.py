@@ -302,6 +302,7 @@ def main():
     global study_url
     global url
     global pgn_source_url
+    global pgn_source_directory
     global http_url
     global ws_url
 
@@ -335,10 +336,11 @@ def main():
     poll = None
     if url.startswith('http://') or url.startswith('https://'):
         pgn_source_url = url
-        print("Polling URL!")
+        print("Polling URL: {}".format(pgn_source_url))
         poll = update_pgns
     else:
         pgn_source_directory = url
+        print("Polling directory: {}".format(pgn_source_directory))
         poll = poll_files
     yield login()
     yield connect_to_study()
