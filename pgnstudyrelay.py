@@ -56,6 +56,7 @@ study_url = None
 url = None
 http_url = None
 ws_url = None
+poll_delay = None
 
 def game_key_from_tags(tags):
     white = "-".join(tags['White'].replace(",", "").split())
@@ -274,18 +275,18 @@ def sync_with_study(chapter_id=None):
         yield sync_chapter(chapter['id'])
 
 @gen.coroutine
-def update_pgns():
+def update_pgns(time_to_delay):
     while True:
         client = httpclient.AsyncHTTPClient()
         url = "{}?v={}".format(pgn_source_url, time.time())
         print(".", end="", flush=True)
         response = yield client.fetch(url)
         yield process_pgn(response.body.decode("ISO-8859-1")) # TODO: pull this from the content-type
-        yield gen.sleep(1)
+        yield gen.sleep(time_to_delay)
 
 already_processed = []
 @gen.coroutine
-def poll_files():
+def poll_files(time_to_delay):
     files = sorted(glob.glob("{}/*.pgn".format(pgn_source_directory)))
     for file in files:
         if file in already_processed:
@@ -294,7 +295,7 @@ def poll_files():
         already_processed.append(file)
         contents = open(file, "r").read()
         yield process_pgn(contents)
-        yield gen.sleep(1)
+        yield gen.sleep(time_to_delay)
 
 @gen.coroutine
 def main():
@@ -307,6 +308,7 @@ def main():
     global pgn_source_directory
     global http_url
     global ws_url
+    global poll_delay
 
     import argparse
 
@@ -315,6 +317,7 @@ def main():
     parser.add_argument("password", help="The password for that username")
     parser.add_argument("study_url", help="The study URL where the moves should be relayed. NOTE: the user must have contributor access")
     parser.add_argument("url", help="A PGN url that will be polled, or a directory containing already polled PGN files.")
+    parser.add_argument("--poll_delay", type=float, default=1, help="The time to wait (in seconds) between polling. Accepts floats")
     args = parser.parse_args()
 
 
@@ -347,7 +350,7 @@ def main():
     yield login()
     yield connect_to_study()
     yield sync_with_study()
-    yield [poll(), listen_to_study(), ping_study()]
+    yield [poll(args.poll_delay), listen_to_study(), ping_study()]
 
 if __name__ == '__main__':
     main()
