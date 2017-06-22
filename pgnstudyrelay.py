@@ -15,20 +15,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.  
 
-import pprint
+from http import cookies
+from io import StringIO
+from tornado import gen
+from tornado import websocket, web, ioloop, httpclient
+from urllib.parse import urlencode
 import chess
 import chess.pgn
 import glob
-from io import StringIO
 import json
+import lichess
+import pprint
 import random
 import string
-from tornado import gen
-from tornado import websocket, web, ioloop, httpclient
-from http import cookies
-from urllib.parse import urlencode
+import sys
 import time
-import lichess
 
 
 # everyone loves global mutable state, right?  Right?  
@@ -47,9 +48,11 @@ headers = {
 cookie = None
 study_socket = None
 pgn_source_url = None
+pgn_source_directory = None
 username = None
 password = None
-study = None
+study_id = None
+study_url = None
 url = None
 http_url = "https://listage.ovh"
 ws_url = "wss://socket.listage.ovh"
@@ -186,7 +189,7 @@ def connect_to_study():
     sri = "".join([random.choice(string.ascii_letters) for x in range(10)])
     study_url = "{}/study/{}/socket/v2?sri={}".format(
         ws_url,
-        study,
+        study_id,
         sri
     )
     socket_request = httpclient.HTTPRequest(study_url, headers=headers)
@@ -227,13 +230,13 @@ def get_json(url):
 
 @gen.coroutine
 def get_study_data():
-    url = "{}/study/{}?_={}".format(http_url, study, time.time())
+    url = "{}/study/{}?_={}".format(http_url, study_id, time.time())
     json = yield get_json(url)
     return json
 
 @gen.coroutine
 def get_chapter_data(chapter_id):
-    url = "{}/study/{}/{}?_={}".format(http_url, study, chapter_id, time.time())
+    url = "{}/study/{}/{}?_={}".format(http_url, study_id, chapter_id, time.time())
     json = yield get_json(url)
     return json
 
@@ -262,6 +265,9 @@ def sync_chapter(chapter_id=None):
 def sync_with_study(chapter_id=None):
     print("Syncing with study")
     study_data = yield get_study_data()
+    members = study_data['study']['members']
+    if username not in members or members[username]['role'] != 'w':
+        sys.exit("{} is not a contributor of {}".format(username, study_url))
     for chapter in study_data['study'].get('chapters', []):
         yield sync_chapter(chapter['id'])
 
@@ -278,7 +284,7 @@ def update_pgns():
 already_processed = []
 @gen.coroutine
 def poll_files():
-    files = sorted(glob.glob("./local-files/*.pgn"))
+    files = sorted(glob.glob("{}/*.pgn".format(pgn_source_directory)))
     for file in files:
         if file in already_processed:
             continue
@@ -292,20 +298,45 @@ def poll_files():
 def main():
     global username
     global password
-    global study
+    global study_id
+    global study_url
     global url
     global pgn_source_url
-    import sys
+
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("username", help="A lichess username")
+    parser.add_argument("password", help="The password for that username")
+    parser.add_argument("study_url", help="The study URL where the moves should be relayed. NOTE: the user must have contributor access")
+    parser.add_argument("url", help="A PGN url that will be polled, or a directory containing already polled PGN files.")
+    args = parser.parse_args()
+
+
+    username = args.username
+    password = args.password
+
+
+    study_url = args.study_url
+    if study_url.startswith("https://lichess.org/study/"):
+        http_url = "https://lichess.org"
+        ws_url = "wss://socket.lichess.org"
+        study_id = study_url.replace("https://lichess.org/study/", "")
+    if study_url.startswith("https://listage.ovh/study/"):
+        http_url = "https://listage.ovh"
+        ws_url = "wss://socket.listage.ovh"
+        study_id = study_url.replace("https://listage.ovh/study/", "")
+    else:
+        sys.exit("study_url must start with https://lichess.org/study/<studyId> or https://listage.ovh/study/<studyId>")
+
+    url = args.url
     poll = None
-    if len(sys.argv) < len(['username', 'password', 'study']):
-        sys.exit("Usage: pgnstudyrelay.py <username> <password> <study> [<url>]")
-    if len(sys.argv) == len(['_', 'username', 'password', 'study', 'url']):
-        _, username, password, study, url = sys.argv
+    if url.startswith('http://') or url.startswith('https://'):
         pgn_source_url = url
         print("Polling URL!")
         poll = update_pgns
     else:
-        _, username, password, study = sys.argv
+        pgn_source_directory = url
         poll = poll_files
     yield login()
     yield connect_to_study()
