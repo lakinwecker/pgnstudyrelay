@@ -54,8 +54,8 @@ password = None
 study_id = None
 study_url = None
 url = None
-http_url = "https://listage.ovh"
-ws_url = "wss://socket.listage.ovh"
+http_url = None
+ws_url = None
 
 def game_key_from_tags(tags):
     white = "-".join(tags['White'].replace(",", "").split())
@@ -302,6 +302,8 @@ def main():
     global study_url
     global url
     global pgn_source_url
+    global http_url
+    global ws_url
 
     import argparse
 
