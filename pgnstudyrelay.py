@@ -139,7 +139,9 @@ def process_pgn(contents):
                 print("New move in {}: {}".format(key, cur_node.move.uci()))
                 message = lichess.add_move_to_study(cur_node, prev_node, chapter['id'], path)
                 yield send_to_study_socket(message)
-                path += lichess.move_to_path_id(cur_node.board()._to_chess960(cur_node.move))
+                move = prev_node.board()._to_chess960(cur_node.move)
+                path_part = lichess.move_to_path_id(move)
+                path += path_part
                 if cur_node.is_end():
                     break
 

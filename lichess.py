@@ -43,7 +43,7 @@ def clock_from_comment(comment):
     return comment.strip()
 
 def add_move_to_study(new_node, old_node, chapter_id, path):
-    uci = new_node.move.uci()
+    uci = old_node.board().uci(new_node.move, chess960=True)
     move = {
         "t":"anaMove",
         "d":{
@@ -126,9 +126,21 @@ def move_to_path_id(move):
     >>> move_to_path_id(Move(H7, H8, KNIGHT))
     'Z\x82'
 
+    >>> from chess import E8, G8, Move
+    >>> move_to_path_id(Move(E8, G8))
+    '_a'
+
+    >>> from chess import E8, H8, Move
+    >>> move_to_path_id(Move(E8, H8))
+    '_b'
+
     >>> from chess import E1, H1, Move
     >>> move_to_path_id(Move(E1, H1))
     "'*"
+
+    >>> from chess import E1, G1, Move
+    >>> move_to_path_id(Move(E1, G1))
+    "')"
 
     """
     if move.drop:
