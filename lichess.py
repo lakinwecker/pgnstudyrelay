@@ -42,13 +42,20 @@ def clock_from_comment(comment):
     comment = comment.replace("]", "")
     return comment.strip()
 
+promotion_lookup = {
+    "q": "queen",
+    "r": "rook",
+    "b": "bishop",
+    "n": "knight",
+    "k": "king",
+}
 def add_move_to_study(new_node, old_node, chapter_id, path):
     uci = old_node.board().uci(new_node.move, chess960=True)
     move = {
         "t":"anaMove",
         "d":{
             "orig": uci[:2],
-            "dest": uci[2:],
+            "dest": uci[2:4],
             "fen": old_node.board().fen(),
             "path": path,
             "ch": chapter_id,
@@ -56,6 +63,8 @@ def add_move_to_study(new_node, old_node, chapter_id, path):
             "promote": True,
         }
     }
+    if len(uci) == 5:
+        move["d"]["promotion"] = promotion_lookup[uci[4]]
     clock = clock_from_comment(new_node.comment)
     if clock:
         move["d"]["clock"] = "{}".format(clock)
