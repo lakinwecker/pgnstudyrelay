@@ -59,6 +59,8 @@ import glob
 from io import StringIO
 from urllib.parse import urlparse
 
+from collections import defaultdict
+
 from lichess import (
     move_to_path_id,
     Lichess,
@@ -82,55 +84,63 @@ def game_key_from_chapter(chapter):
     tags = dict(chapter['study']['chapter']['tags'])
     return game_key_from_tags(tags)
 
+def game_title_from_tags(tags):
+    white = tags.get('White', '').split(", ")[0]
+    black = tags.get('Black', '').split(", ")[0]
+    if not white or not black:
+        return ''
+    key = "{} vs {}".format(white, black)
+    return key
+
+def game_title_from_game(game):
+    return game_title_from_tags(game.headers)
+
 class PGNStudyRelay:
     def __init__(self, study):
         self.study = study
-        self.pgns_by_key = {}
+        self.pgns_by_key = defaultdict(str)
 
     async def sync_with_pgn(self, contents):
         try:
             handle = StringIO(contents)
             while True:
-                new_game = chess.pgn.read_game(handle)
-                if new_game is None:
-                    break
-                key = game_key_from_game(new_game)
-                new_game.key = key
+                game = chess.pgn.read_game(handle)
+                if game is None: break
+                if len(game.variations) == 0: continue
+
+                game.key = game_key_from_game(game)
+                game.title = game_title_from_game(game)
 
                 # Only process the PGN if it's different from last time
-                if key not in self.pgns_by_key:
-                    self.pgns_by_key[key] = new_game
-                else:
-                    old_game = self.pgns_by_key[key]
-                    if str(old_game) == str(new_game):
-                        continue
-                    self.pgns_by_key[key] = new_game
+                old_game = self.pgns_by_key[game.key]
+                if str(old_game) == str(game): continue
+                self.pgns_by_key[game.key] = game
 
                 chapter_lookup = {game_key_from_chapter(c): c for c in self.study.get_chapters()}
+                chapter = chapter_lookup.get(game.key)
 
-                if key not in chapter_lookup:
-                    print("++ [SYNCING] inserting new chapter for: {}".format(key))
-                    await self.study.create_chapter_from_pgn(str(new_game))
+                if not chapter:
+                    print("++ [SYNCING] inserting new chapter for: {}".format(game.title))
+                    await self.study.create_chapter_from_pgn(str(game))
                     continue
 
-                chapter = chapter_lookup[key]
-
-                # Make sure we're up to date
                 tree_parts = chapter['analysis']['treeParts']
                 total_ply = len(tree_parts)
 
                 more_data_incoming = False
                 path = ""
-                if not len(new_game.variations) > 0:
+                if not len(game.variations) > 0:
                     print("++ [SYNCING] No game data yet")
                     continue
-                cur_node = new_game.variations[0]
-                prev_node = new_game
+                cur_node = game.variations[0]
+                prev_node = game
                 if total_ply > 1:
                     tree_index = 1
                     tree_node = tree_parts[tree_index]
 
                     while True:
+                        #print(game.title, total_ply, tree_index)
+                        #print(game.title, tree_node['san'], cur_node.san())
                         if tree_node['san'] != cur_node.san():
                             print("++ [SYNCING] Difference in move sans!")
                             more_data_incoming = True
@@ -143,6 +153,7 @@ class PGNStudyRelay:
                         if tree_index+1 == total_ply:
                             print("++ [SYNCING] End of chapter")
                             more_data_incoming = True
+                            # TODO: figure this out
                             break
 
                         path += tree_node['id']
@@ -154,11 +165,16 @@ class PGNStudyRelay:
                     more_data_incoming = True
 
                 while more_data_incoming:
+                    #print(game.title, cur_node.san())
+
+                    # Ensure we're not out of sync with the latest data. If we are, bail out. We'll get 
+                    # these moves when processing the next pgn
                     new_chapter = self.study.get_chapter(chapter['id'])
                     if new_chapter['version'] != chapter['version']:
                         print("++ [SYNCING] Chapter {} was updated while we were processing moves. Bailing out")
                         break
-                    print("++ [SYNCING] New move in {}: {}".format(key, cur_node.move.uci()))
+
+                    print("++ [SYNCING] New move in {}: {}".format(game.title, cur_node.move.uci()))
                     await self.study.add_move(chapter['id'], path, cur_node, prev_node)
                     move = prev_node.board()._to_chess960(cur_node.move)
                     path_part = move_to_path_id(move)
@@ -171,11 +187,12 @@ class PGNStudyRelay:
                     await asyncio.sleep(0.5) # TODO:  This could be smarter.
                 await self.study.sync_chapter(chapter['id'])
 
-                incoming_result = new_game.headers['Result']
+                incoming_result = game.headers['Result']
                 if incoming_result != "*":
                     if chapter['tags']['Result'] != incoming_result and cur_node.is_end():
-                        await self.study.set_tag(chapter['id'], 'Result', new_game.headers['Result'])
-                        await self.study.set_comment(chapter['id'], path, "Game ended in: {}".format(incoming_result))
+                        await self.study.set_tag(chapter['id'], 'Result', game.headers['Result'])
+                        await self.study.set_move_comment(chapter['id'], path, "Game ended in: {}".format(incoming_result))
+                        await self.study.talk("{} ended in: {}".format(game.title, incoming_result))
         except:
             import traceback
             print(traceback.format_exc())
@@ -196,6 +213,7 @@ async def main(loop):
         parser.add_argument("study_url", help="The study URL where the moves should be relayed. NOTE: the user must have contributor access")
         parser.add_argument("url", help="A PGN url that will be polled, or a directory containing already polled PGN files.")
         parser.add_argument("--poll_delay", type=float, default=1, help="The time to wait (in seconds) between polling. Accepts floats")
+        parser.add_argument("--log_ws", type=bool, default=False, help="Log websocket messages")
         args = parser.parse_args()
 
         username = args.username
@@ -204,7 +222,7 @@ async def main(loop):
         study_url = args.study_url
         components = urlparse(study_url)
         base_url = "{}://{}/".format(components.scheme, components.netloc)
-        lichess = Lichess(loop, session, base_url)
+        lichess = Lichess(loop, session, base_url, log_ws=args.log_ws)
         try:
             await lichess.login(username, password)
         except LoginError:

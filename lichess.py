@@ -159,6 +159,7 @@ headers = {
 # The objects used to interact with the study.
 #-------------------------------------------------------------------------------
 class Study:
+    #---------------------------------------------------------------------------
     def __init__(self, lichess, study_id):
         self.lichess = lichess
         self.study_id = study_id
@@ -178,11 +179,13 @@ class Study:
         self.websocket_connected = asyncio.Future()
         self.should_stop = False
 
+    #---------------------------------------------------------------------------
     async def connect(self):
         await self.sync()
         asyncio.ensure_future(self.connect_to_websocket())
         await self.websocket_connected
 
+    #---------------------------------------------------------------------------
     async def connect_to_websocket(self):
         async with self.lichess.session.ws_connect(self.websocket_url, headers=headers) as websocket:
             self.websocket = websocket
@@ -191,16 +194,17 @@ class Study:
             async for msg in websocket:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = json.loads(msg.data)
+                    if self.lichess.log_ws:
+                        print("<- [RECEIVE]: {}".format(msg.data))
                     if data['t'] == 'addChapter':
                         # We got a new chapter, we should sync it
                         await self.sync_chapter(data['d']['p']['chapterId'])
                     elif data['t'] == 'reload':
-                        chapter_id = data['d'].get('chapterId')
+                        chapter_id = data.get('d', {}).get('chapterId')
                         if chapter_id:
                             await self.sync_chapter(chapter_id)
                         else:
                             await self.sync()
-                    print("<- [RECEIVE]: {}".format(msg.data))
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
                     print("Lost connection, disconnecting")
                     self.should_stop = True
@@ -211,6 +215,7 @@ class Study:
                     break
             await ping_future
 
+    #---------------------------------------------------------------------------
     async def _ping(self):
         while True:
             await self.send({"t": "p"})
@@ -219,18 +224,22 @@ class Study:
                 break
 
     # TODO: There has to be a better way to accomplish this O_o
+    #---------------------------------------------------------------------------
     async def send(self, data):
         if not self.websocket:
             raise RuntimeError("Sending without a websocket!!")
         msg_str = json.dumps(data)
-        print("-> [SENDING]: {}".format(msg_str))
+        if self.lichess.log_ws:
+            print("-> [SENDING]: {}".format(msg_str))
         await self.websocket.send_str(msg_str)
 
+    #---------------------------------------------------------------------------
     def ensure_contributor(self):
         members = self.study_data['study']['members']
         if self.lichess.username not in members or members[self.lichess.username]['role'] != 'w':
             raise StudyNotAContributor("The user must be a contributor to the study")
 
+    #---------------------------------------------------------------------------
     async def sync(self):
         response = await self.lichess.session.get(self.study_url, headers=headers)
         if response.status != 200:
@@ -243,6 +252,7 @@ class Study:
             if chapter['id'] not in self._chapters:
                 await self.sync_chapter(chapter['id'])
 
+    #---------------------------------------------------------------------------
     async def sync_chapter(self, chapter_id):
         chapter_url = "{}/{}?_={}".format(self.study_url, chapter_id, time.time())
         print("++ [SYNCING] Chapter: {}".format(chapter_id))
@@ -266,12 +276,15 @@ class Study:
         chapter_data['version'] = self._chapter_versions[chapter_id]
         self._chapters[chapter_id] = chapter_data
 
+    #---------------------------------------------------------------------------
     def get_chapters(self):
         return self._chapters.values()
 
+    #---------------------------------------------------------------------------
     def get_chapter(self, id):
         return self._chapters[id]
 
+    #---------------------------------------------------------------------------
     async def create_chapter_from_pgn(self, pgn):
         await self.send({
             "t":"addChapter",
@@ -288,6 +301,7 @@ class Study:
             }
         })
 
+    #---------------------------------------------------------------------------
     async def add_move(self, chapter_id, path,new_node, old_node):
         promotion_lookup = {
             "q": "queen",
@@ -316,7 +330,7 @@ class Study:
             move["d"]["clock"] = "{}".format(clock)
         await self.send(move)
 
-    #{"t":"setTag","d":{"chapterId":"NNgEcycT","name":"Result","value":"1/2-1/2"}}
+    #---------------------------------------------------------------------------
     async def set_tag(self, chapter_id, tag_name, tag_value):
         await self.send({
             "t": "setTag",
@@ -327,7 +341,8 @@ class Study:
             }
         })
 
-    async def set_comment(self, chapter_id, path, comment):
+    #---------------------------------------------------------------------------
+    async def set_move_comment(self, chapter_id, path, comment):
         await self.send({
             "t": "setComment",
             "d": { 
@@ -337,11 +352,21 @@ class Study:
             }
         })
 
+    #---------------------------------------------------------------------------
+    {"t":"talk","d":"test2"}
+    async def talk(self, message):
+        await self.send({
+            "t": "talk",
+            "d": message,
+        })
 
 
 
+
+#-------------------------------------------------------------------------------
 class Lichess:
-    def __init__(self, loop, session, url):
+    #---------------------------------------------------------------------------
+    def __init__(self, loop, session, url, log_ws=False):
         if url not in [STAGING_URL, LIVE_URL]:
             raise RuntimeError("{} is not one of {} or {}".format(
                 url,
@@ -353,7 +378,9 @@ class Lichess:
         self.base_url = url
         self.domain = "lichess.org" if url == LIVE_URL else "listage.ovh"
         self.session = session
+        self.log_ws = False
 
+    #---------------------------------------------------------------------------
     def url(self, path, scheme="https"):
         """Generate a lichess url from the given path component. 
 
@@ -361,6 +388,7 @@ class Lichess:
         """
         return "{}://{}/{}".format(scheme, self.domain, path)
 
+    #---------------------------------------------------------------------------
     async def login(self, username, password):
         """Login to lichess using the given credentials.
 
@@ -375,6 +403,7 @@ class Lichess:
         if response.status != 200:
             raise LoginError("Unable to login")
 
+    #---------------------------------------------------------------------------
     async def study(self, study_id):
         study = Study(self, study_id)
         await study.connect()
