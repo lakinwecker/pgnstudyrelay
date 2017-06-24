@@ -106,7 +106,6 @@ class PGNStudyRelay:
         while True:
             game = chess.pgn.read_game(handle)
             if game is None: break
-            if len(game.variations) == 0: continue
 
             game.key = game_key_from_game(game)
             game.title = game_title_from_game(game)
@@ -126,6 +125,10 @@ class PGNStudyRelay:
                 chapters_created = True
                 continue
 
+            # This could happen above, but then that delays the creation of the 
+            # games when it first starts.
+            if len(game.variations) == 0: continue
+
             has_new_moves = False
 
             tree_parts = chapter['analysis']['treeParts']
@@ -142,14 +145,14 @@ class PGNStudyRelay:
                         has_new_moves = True
                         break
 
+                    # if we're at the end of the incoming moves we're done.
+                    if cur_node.is_end(): break
+
                     # The moves were the same, update iterator for incoming moves
                     # and the path
                     path += tree_node['id']
                     prev_node = cur_node
                     cur_node = cur_node.variations[0]
-
-                    # if we're at the end of the incoming moves we're done.
-                    if cur_node.is_end(): break
 
                     # We're done with the chapter moves, but not the incoming moves
                     if tree_index+1 == tree_len:
@@ -167,7 +170,7 @@ class PGNStudyRelay:
                     # We will get to these moves when processing the next pgn
                     new_chapter = self.study.get_chapter(chapter['id'])
                     if new_chapter['version'] != chapter['version']:
-                        print("++ [SYNCING] Chapter {} updated while processing moves.".format(chapter['id']))
+                        print("-- [SYNCING] Chapter {} updated while processing moves.".format(chapter['id']))
                         break
 
                     print("++ [SYNCING] New move in {}: {}".format(game.title, cur_node.move.uci()))
@@ -181,25 +184,25 @@ class PGNStudyRelay:
                     await asyncio.sleep(0.5) # TODO:  This could be smarter.
                 await self.study.sync_chapter(chapter['id'])
 
-                incoming_result = game.headers['Result']
-                if incoming_result != "*":
-                    if chapter['tags']['Result'] != incoming_result and cur_node.is_end():
-                        await self.study.set_tag(chapter['id'], 'Result', game.headers['Result'])
-                        await self.study.set_move_comment(chapter['id'], path, "Game ended in: {}".format(incoming_result))
-                        await self.study.talk("{} ended in: {}".format(game.title, incoming_result))
+            incoming_result = game.headers['Result']
+            if incoming_result != "*":
+                if chapter['tags']['Result'] != incoming_result and cur_node.is_end():
+                    await self.study.set_tag(chapter['id'], 'Result', game.headers['Result'])
+                    await self.study.set_move_comment(chapter['id'], path, "Game ended in: {}".format(incoming_result))
+                    await self.study.talk("{} ended in: {}".format(game.title, incoming_result))
 
         if chapters_created:
             # TODO: there has to be a better way to do this. But at the moment
             #       we are too fast. Wait a full 2seconds before continuing
-            print("++ [SYNCING] Sleeping for 2 seconds to allow lila the opportunity to finish")
+            print("-- [SYNCING] Sleeping for 2 seconds to allow lila the opportunity to finish")
             await asyncio.sleep(2.0)
-            print("++ [SYNCING] Syncing study because we created chapters")
+            print("-- [SYNCING] Syncing study because we created chapters")
             await self.study.sync()
 
 async def poll_files(relay, directory, delay):
     files = sorted(glob.glob("{}/*.pgn".format(directory)))
     for file in files:
-        print("++ [POLLING] {}".format(file))
+        print("~~ [POLLING] {}".format(file))
         contents = open(file, "r").read()
         await relay.sync_with_pgn(contents)
         await asyncio.sleep(delay)
@@ -247,7 +250,7 @@ async def main(loop):
             print("Polling URL: {}".format(pgn_source_url))
             await update_pgns(url)
         else:
-            print("++ [POLLING] processing {}".format(url))
+            print("~~ [POLLING] processing {}".format(url))
             await poll_files(relay, url, args.poll_delay)
 
 if __name__ == '__main__':
