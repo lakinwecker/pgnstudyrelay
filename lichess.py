@@ -186,6 +186,14 @@ class Study:
         await self.websocket_connected
 
     #---------------------------------------------------------------------------
+    async def process_chat_message(self, data):
+        contributors = [u for u, v in self.study_data['study']['members'].items() if v['role'] == 'w']
+        if data['u'] in contributors:
+            if data['t'] == 'sync':
+                print("<- [RECEIVE]: {} is a contributor. Syncing".format(data['u']))
+                await self.sync()
+
+    #---------------------------------------------------------------------------
     async def connect_to_websocket(self):
         async with self.lichess.session.ws_connect(self.websocket_url, headers=headers) as websocket:
             self.websocket = websocket
@@ -194,6 +202,8 @@ class Study:
             async for msg in websocket:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = json.loads(msg.data)
+                    if not data:
+                        continue
                     if self.lichess.log_ws:
                         print("<- [RECEIVE]: {}".format(msg.data))
                     if data['t'] == 'addChapter':
@@ -205,6 +215,10 @@ class Study:
                             await self.sync_chapter(chapter_id)
                         else:
                             await self.sync()
+                    elif data['t'] == 'message':
+                        d = data.get("d")
+                        if d:
+                            await self.process_chat_message(d)
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
                     print("Lost connection, disconnecting")
                     self.should_stop = True
@@ -241,6 +255,7 @@ class Study:
 
     #---------------------------------------------------------------------------
     async def sync(self, full=False):
+        print("++ [SYNCING] getting full study")
         response = await self.lichess.session.get(self.study_url, headers=headers)
         if response.status != 200:
             raise StudyConnectionError("Unable to connect to the study. {} returned {}".format(
