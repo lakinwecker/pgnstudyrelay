@@ -189,9 +189,9 @@ class Study:
     async def process_chat_message(self, data):
         contributors = [u for u, v in self.study_data['study']['members'].items() if v['role'] == 'w']
         if data['u'] in contributors:
-            if data['t'] == 'sync':
+            if data.get('t', '').startswith('sync '):
                 print("<- [RECEIVE]: {} is a contributor. Syncing".format(data['u']))
-                await self.sync()
+                await self.sync(full=True)
 
     #---------------------------------------------------------------------------
     async def connect_to_websocket(self):

@@ -66,6 +66,7 @@ class PGNStudyRelay:
     def __init__(self, study):
         self.study = study
         self.pgns_by_key = defaultdict(str)
+        self.chapter_versions_by_key = defaultdict(str)
 
     async def sync_with_pgn(self, contents):
         handle = StringIO(contents)
@@ -77,14 +78,23 @@ class PGNStudyRelay:
             game.key = game_key_from_game(game)
             game.title = game_title_from_game(game)
 
-            # Only process the PGN if it's different from last time
-            old_game = self.pgns_by_key[game.key]
-            if str(old_game) == str(game):
-                continue
-            self.pgns_by_key[game.key] = game
-
             chapter_lookup = {game_key_from_chapter(c): c for c in self.study.get_chapters()}
             chapter = chapter_lookup.get(game.key)
+
+            should_sync = False
+
+            old_version = self.chapter_versions_by_key[game.key]
+            if old_version != chapter['version']:
+                should_sync = True
+
+            # Only process the PGN if it's different from last time
+            old_game = self.pgns_by_key[game.key]
+            if str(old_game) != str(game):
+                should_sync = True
+            self.pgns_by_key[game.key] = game
+
+            if not should_sync:
+                continue
 
             if not chapter:
                 print("++ [SYNCING] inserting new chapter for: {}".format(game.title))
