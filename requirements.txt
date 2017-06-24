@@ -1,2 +1,4 @@
 python-chess
-tornado
+cchardet
+aiohttp
+aiodns
