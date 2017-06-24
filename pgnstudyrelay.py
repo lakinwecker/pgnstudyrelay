@@ -16,39 +16,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.  
-'''
-@gen.coroutine
-def update_pgns(time_to_delay):
-    while True:
-        client = httpclient.AsyncHTTPClient()
-        url = "{}?v={}".format(pgn_source_url, time.time())
-        print(".", end="", flush=True)
-        response = yield client.fetch(url)
-        yield process_pgn(response.body.decode("ISO-8859-1")) # TODO: pull this from the content-type
-        yield gen.sleep(time_to_delay)
-
-@gen.coroutine
-def main():
-
-    url = args.url
-    poll = None
-    if url.startswith('http://') or url.startswith('https://'):
-        pgn_source_url = url
-        print("Polling URL: {}".format(pgn_source_url))
-        poll = update_pgns
-    else:
-        pgn_source_directory = url
-        print("Polling directory: {}".format(pgn_source_directory))
-        poll = poll_files
-    yield login()
-    yield connect_to_study()
-    yield sync_with_study()
-    yield [poll(args.poll_delay), listen_to_study()]
-
-if __name__ == '__main__':
-    main()
-ioloop.IOLoop.instance().start()
-'''
 
 import argparse
 import asyncio
@@ -207,6 +174,16 @@ async def poll_files(relay, directory, delay):
         await relay.sync_with_pgn(contents)
         await asyncio.sleep(delay)
 
+async def poll_url(relay, url, delay):
+    async with aiohttp.ClientSession(loop=loop) as session:
+        while True:
+            url = "{}?v={}".format(url, time.time())
+            print("~~ [POLLING] {}".format(url))
+            response = await self.lichess.session.get(url)
+            body = await response.read()
+            await relay.sync_with_pgn(body.decode("ISO-8859-1"))
+            await asyncio.sleep(delay)
+
 async def main(loop):
     async with aiohttp.ClientSession(loop=loop) as session:
         parser = argparse.ArgumentParser()
@@ -248,7 +225,7 @@ async def main(loop):
         poll = None
         if url.startswith('http://') or url.startswith('https://'):
             print("Polling URL: {}".format(pgn_source_url))
-            await update_pgns(url)
+            await poll_url(relay, url, args.poll_delay)
         else:
             print("~~ [POLLING] processing {}".format(url))
             await poll_files(relay, url, args.poll_delay)
