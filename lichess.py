@@ -240,7 +240,7 @@ class Study:
             raise StudyNotAContributor("The user must be a contributor to the study")
 
     #---------------------------------------------------------------------------
-    async def sync(self):
+    async def sync(self, full=False):
         response = await self.lichess.session.get(self.study_url, headers=headers)
         if response.status != 200:
             raise StudyConnectionError("Unable to connect to the study. {} returned {}".format(
@@ -249,13 +249,13 @@ class Study:
             ))
         self.study_data = await response.json()
         for chapter in self.study_data['study'].get('chapters', []):
-            if chapter['id'] not in self._chapters:
+            if full or chapter['id'] not in self._chapters:
                 await self.sync_chapter(chapter['id'])
 
     #---------------------------------------------------------------------------
     async def sync_chapter(self, chapter_id):
         chapter_url = "{}/{}?_={}".format(self.study_url, chapter_id, time.time())
-        print("++ [SYNCING] Chapter: {}".format(chapter_id))
+        print("++ [SYNCING] getting new chapter#{}".format(chapter_id))
         response = await self.lichess.session.get(chapter_url, headers=headers)
         if response.status != 200:
             raise StudyConnectionError("Unable to connect to the chapter. {} returned {}".format(

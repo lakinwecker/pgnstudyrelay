@@ -101,84 +101,78 @@ class PGNStudyRelay:
         self.pgns_by_key = defaultdict(str)
 
     async def sync_with_pgn(self, contents):
-        try:
-            handle = StringIO(contents)
-            while True:
-                game = chess.pgn.read_game(handle)
-                if game is None: break
-                if len(game.variations) == 0: continue
+        handle = StringIO(contents)
+        chapters_created = False
+        while True:
+            game = chess.pgn.read_game(handle)
+            if game is None: break
+            if len(game.variations) == 0: continue
 
-                game.key = game_key_from_game(game)
-                game.title = game_title_from_game(game)
+            game.key = game_key_from_game(game)
+            game.title = game_title_from_game(game)
 
-                # Only process the PGN if it's different from last time
-                old_game = self.pgns_by_key[game.key]
-                if str(old_game) == str(game): continue
-                self.pgns_by_key[game.key] = game
+            # Only process the PGN if it's different from last time
+            old_game = self.pgns_by_key[game.key]
+            if str(old_game) == str(game):
+                continue
+            self.pgns_by_key[game.key] = game
 
-                chapter_lookup = {game_key_from_chapter(c): c for c in self.study.get_chapters()}
-                chapter = chapter_lookup.get(game.key)
+            chapter_lookup = {game_key_from_chapter(c): c for c in self.study.get_chapters()}
+            chapter = chapter_lookup.get(game.key)
 
-                if not chapter:
-                    print("++ [SYNCING] inserting new chapter for: {}".format(game.title))
-                    await self.study.create_chapter_from_pgn(str(game))
-                    continue
+            if not chapter:
+                print("++ [SYNCING] inserting new chapter for: {}".format(game.title))
+                await self.study.create_chapter_from_pgn(str(game))
+                chapters_created = True
+                continue
 
-                tree_parts = chapter['analysis']['treeParts']
-                total_ply = len(tree_parts)
+            has_new_moves = False
 
-                more_data_incoming = False
-                path = ""
-                if not len(game.variations) > 0:
-                    print("++ [SYNCING] No game data yet")
-                    continue
-                cur_node = game.variations[0]
-                prev_node = game
-                if total_ply > 1:
-                    tree_index = 1
+            tree_parts = chapter['analysis']['treeParts']
+            tree_len = len(tree_parts)
+            tree_index = 1
+            path = ""
+            prev_node = game
+            cur_node = game.variations[0]
+            if tree_len > 1:
+                tree_node = tree_parts[tree_index]
+
+                while True:
+                    if tree_node['san'] != cur_node.san():
+                        has_new_moves = True
+                        break
+
+                    # The moves were the same, update iterator for incoming moves
+                    # and the path
+                    path += tree_node['id']
+                    prev_node = cur_node
+                    cur_node = cur_node.variations[0]
+
+                    # if we're at the end of the incoming moves we're done.
+                    if cur_node.is_end(): break
+
+                    # We're done with the chapter moves, but not the incoming moves
+                    if tree_index+1 == tree_len:
+                        has_new_moves = True
+                        break
+
+                    tree_index += 1
                     tree_node = tree_parts[tree_index]
+            else:
+                has_new_moves = True
 
-                    while True:
-                        #print(game.title, total_ply, tree_index)
-                        #print(game.title, tree_node['san'], cur_node.san())
-                        if tree_node['san'] != cur_node.san():
-                            print("++ [SYNCING] Difference in move sans!")
-                            more_data_incoming = True
-                            break
-                        if cur_node.is_end():
-                            path += tree_node['id']
-                            print("++ [SYNCING] End of incoming data")
-                            break
-
-                        if tree_index+1 == total_ply:
-                            print("++ [SYNCING] End of chapter")
-                            more_data_incoming = True
-                            # TODO: figure this out
-                            break
-
-                        path += tree_node['id']
-                        tree_index += 1
-                        tree_node = tree_parts[tree_index]
-                        prev_node = cur_node
-                        cur_node = cur_node.variations[0]
-                else:
-                    more_data_incoming = True
-
-                while more_data_incoming:
-                    #print(game.title, cur_node.san())
-
-                    # Ensure we're not out of sync with the latest data. If we are, bail out. We'll get 
-                    # these moves when processing the next pgn
+            if has_new_moves:
+                while True:
+                    # Ensure we are in sync with the latest data.  If not, stop sending moves.
+                    # We will get to these moves when processing the next pgn
                     new_chapter = self.study.get_chapter(chapter['id'])
                     if new_chapter['version'] != chapter['version']:
-                        print("++ [SYNCING] Chapter {} was updated while we were processing moves. Bailing out")
+                        print("++ [SYNCING] Chapter {} updated while processing moves.".format(chapter['id']))
                         break
 
                     print("++ [SYNCING] New move in {}: {}".format(game.title, cur_node.move.uci()))
                     await self.study.add_move(chapter['id'], path, cur_node, prev_node)
-                    move = prev_node.board()._to_chess960(cur_node.move)
-                    path_part = move_to_path_id(move)
-                    path += path_part
+                    path += move_to_path_id(prev_node.board()._to_chess960(cur_node.move))
                     if cur_node.is_end():
                         break
 
@@ -193,9 +187,14 @@ class PGNStudyRelay:
                         await self.study.set_tag(chapter['id'], 'Result', game.headers['Result'])
                         await self.study.set_move_comment(chapter['id'], path, "Game ended in: {}".format(incoming_result))
                         await self.study.talk("{} ended in: {}".format(game.title, incoming_result))
-        except:
-            import traceback
-            print(traceback.format_exc())
+
+        if chapters_created:
+            # TODO: there has to be a better way to do this. But at the moment
+            #       we are too fast. Wait a full 2seconds before continuing
+            print("++ [SYNCING] Sleeping for 2 seconds to allow lila the opportunity to finish")
+            await asyncio.sleep(2.0)
+            print("++ [SYNCING] Syncing study because we created chapters")
+            await self.study.sync()
 
 async def poll_files(relay, directory, delay):
     files = sorted(glob.glob("{}/*.pgn".format(directory)))
