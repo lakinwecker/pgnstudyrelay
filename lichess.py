@@ -353,7 +353,6 @@ class Study:
         })
 
     #---------------------------------------------------------------------------
-    {"t":"talk","d":"test2"}
     async def talk(self, message):
         await self.send({
             "t": "talk",
