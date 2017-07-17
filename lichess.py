@@ -20,6 +20,8 @@ __all__ = [
     "LoginError",
     "StudyConnectionError"
     "move_to_path_id",
+    "clock_from_comment",
+    "clock_from_seconds",
 ]
 
 import aiohttp
@@ -61,7 +63,7 @@ LIVE_URL = "https://{}/".format(LIVE_DOMAIN)
 LIVE_WS_URL = "wss://socket.{}".format(LIVE_DOMAIN)
 
 #-------------------------------------------------------------------------------
-# Converting raw data into dictionaries suitable for the lichess protocol
+# Some utilities related to the clock values
 #-------------------------------------------------------------------------------
 def clock_from_comment(comment):
     if not "[%clk" in comment:
@@ -70,6 +72,13 @@ def clock_from_comment(comment):
     comment = comment.replace("]", "")
     return comment.strip()
 
+def clock_from_seconds(clk):
+    clk = clk / 100
+    hours = clk // (60*60)
+    left = clk % (60*60)
+    minutes = left // 60
+    seconds = left % 60
+    return "{:01d}:{:02d}:{:02d}".format(int(hours), int(minutes), int(seconds))
 
 #-------------------------------------------------------------------------------
 # Hashing uci moves into 2 character path names in the lichess study style.

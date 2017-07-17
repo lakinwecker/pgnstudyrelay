@@ -24,11 +24,14 @@ import chess
 import chess.pgn
 import glob
 from io import StringIO
+import time
 from urllib.parse import urlparse
 
 from collections import defaultdict
 
 from lichess import (
+    clock_from_comment,
+    clock_from_seconds,
     move_to_path_id,
     Lichess,
     LoginError,
@@ -120,6 +123,13 @@ class PGNStudyRelay:
                         has_new_moves = True
                         break
 
+                    #clock = clock_from_comment(cur_node.comment)
+                    #tree_clock = clock_from_seconds(tree_node.get('clock', 0))
+                    #if clock != tree_clock:
+                        #print("{} vs {}->{}".format(clock, tree_node.get('clock'), tree_clock))
+                        #has_new_moves = True
+                        #break
+
                     # if we're at the end of the incoming moves we're done.
                     if cur_node.is_end(): break
 
@@ -165,6 +175,7 @@ class PGNStudyRelay:
                     await self.study.set_tag(chapter['id'], 'Result', game.headers['Result'])
                     await self.study.set_move_comment(chapter['id'], path, "Game ended in: {}".format(incoming_result))
                     await self.study.talk("{} ended in: {}".format(game.title, incoming_result))
+                    await self.study.sync_chapter(chapter['id'])
 
         if chapters_created:
             # TODO: there has to be a better way to do this. But at the moment
@@ -185,9 +196,9 @@ async def poll_files(relay, directory, delay):
 async def poll_url(relay, url, delay):
     async with aiohttp.ClientSession(loop=loop) as session:
         while True:
-            url = "{}?v={}".format(url, time.time())
-            print("~~ [POLLING] {}".format(url))
-            response = await self.lichess.session.get(url)
+            url_with_buster = "{}?v={}".format(url, time.time())
+            print("~~ [POLLING] {}".format(url_with_buster))
+            response = await session.get(url_with_buster)
             body = await response.read()
             await relay.sync_with_pgn(body.decode("ISO-8859-1"))
             await asyncio.sleep(delay)
@@ -232,7 +243,7 @@ async def main(loop):
         url = args.url
         poll = None
         if url.startswith('http://') or url.startswith('https://'):
-            print("Polling URL: {}".format(pgn_source_url))
+            print("Polling URL: {}".format(url))
             await poll_url(relay, url, args.poll_delay)
         else:
             print("~~ [POLLING] processing {}".format(url))
