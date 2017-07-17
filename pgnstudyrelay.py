@@ -26,6 +26,7 @@ import glob
 from io import StringIO
 import time
 from urllib.parse import urlparse
+import os
 
 from collections import defaultdict
 
@@ -185,9 +186,16 @@ class PGNStudyRelay:
             print("-- [SYNCING] Syncing study because we created chapters")
             await self.study.sync()
 
-async def poll_files(relay, directory, delay):
+async def poll_directory_of_files(relay, directory, delay):
     files = sorted(glob.glob("{}/*.pgn".format(directory)))
     for file in files:
+        print("~~ [POLLING] {}".format(file))
+        contents = open(file, "r").read()
+        await relay.sync_with_pgn(contents)
+        await asyncio.sleep(delay)
+
+async def poll_local_file(relay, file, delay):
+    while True:
         print("~~ [POLLING] {}".format(file))
         contents = open(file, "r").read()
         await relay.sync_with_pgn(contents)
@@ -245,9 +253,12 @@ async def main(loop):
         if url.startswith('http://') or url.startswith('https://'):
             print("Polling URL: {}".format(url))
             await poll_url(relay, url, args.poll_delay)
+        elif os.path.isdir(url):
+            print("~~ [POLLING] processing {}".format(url))
+            await poll_directory_of_files(relay, url, args.poll_delay)
         else:
             print("~~ [POLLING] processing {}".format(url))
-            await poll_files(relay, url, args.poll_delay)
+            await poll_local_file(relay, url, args.poll_delay)
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
