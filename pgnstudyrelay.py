@@ -27,6 +27,7 @@ from io import StringIO
 import time
 from urllib.parse import urlparse
 import os
+import codecs
 
 from collections import defaultdict
 
@@ -191,6 +192,7 @@ async def poll_directory_of_files(relay, directory, delay):
     for file in files:
         print("~~ [POLLING] {}".format(file))
         contents = open(file, "r").read()
+        contents = contents[3:] if contents[0:3] == codecs.BOM_UTF8 else contents
         await relay.sync_with_pgn(contents)
         await asyncio.sleep(delay)
 
@@ -198,6 +200,7 @@ async def poll_local_file(relay, file, delay):
     while True:
         print("~~ [POLLING] {}".format(file))
         contents = open(file, "r").read()
+        contents = contents[3:] if contents[0:3] == codecs.BOM_UTF8 else contents
         await relay.sync_with_pgn(contents)
         await asyncio.sleep(delay)
 
