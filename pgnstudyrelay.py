@@ -211,6 +211,7 @@ async def poll_url(relay, url, delay):
             print("~~ [POLLING] {}".format(url_with_buster))
             response = await session.get(url_with_buster)
             body = await response.read()
+            body = body[3:] if body[0:3] == codecs.BOM_UTF8 else body
             await relay.sync_with_pgn(body.decode("ISO-8859-1"))
             await asyncio.sleep(delay)
 
